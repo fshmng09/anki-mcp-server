@@ -7,6 +7,35 @@ mcp = FastMCP("anki")
 
 ANKI_CONNECT_URL = "http://localhost:8765"
 
+# Model/field name mappings for EN and JA Anki
+_BASIC_CANDIDATES = ["Basic", "基本"]
+_CLOZE_CANDIDATES = ["Cloze", "穴埋め問題"]
+_BASIC_FIELD_MAP = {
+    "Basic": ("Front", "Back"),
+    "基本": ("表面", "裏面"),
+}
+_CLOZE_FIELD_MAP = {
+    "Cloze": ("Text", "Extra"),
+    "穴埋め問題": ("Text", "裏面追記"),
+}
+
+_resolved: dict[str, str] = {}
+
+
+async def _resolve_model(model_type: str) -> str:
+    """Resolve the actual model name available in Anki."""
+    if model_type in _resolved:
+        return _resolved[model_type]
+    models = await anki_request("modelNames")
+    candidates = _BASIC_CANDIDATES if model_type == "basic" else _CLOZE_CANDIDATES
+    for name in candidates:
+        if name in models:
+            _resolved[model_type] = name
+            return name
+    raise Exception(
+        f"No suitable {model_type} model found. Available: {models}"
+    )
+
 
 async def anki_request(action: str, **params):
     """Send a request to AnkiConnect."""
@@ -45,13 +74,15 @@ async def add_card(
         back: Back side of the card (answer). Supports HTML.
         tags: Optional tags (e.g. ["短答", "規範"]).
     """
+    model = await _resolve_model("basic")
+    front_field, back_field = _BASIC_FIELD_MAP[model]
     await anki_request("createDeck", deck=deck)
     note_id = await anki_request(
         "addNote",
         note={
             "deckName": deck,
-            "modelName": "Basic",
-            "fields": {"Front": front, "Back": back},
+            "modelName": model,
+            "fields": {front_field: front, back_field: back},
             "tags": tags or [],
             "options": {
                 "allowDuplicate": False,
@@ -82,13 +113,15 @@ async def add_cloze(
         extra: Optional extra info shown on the back after answering.
         tags: Optional tags (e.g. ["論文", "規範"]).
     """
+    model = await _resolve_model("cloze")
+    text_field, extra_field = _CLOZE_FIELD_MAP[model]
     await anki_request("createDeck", deck=deck)
     note_id = await anki_request(
         "addNote",
         note={
             "deckName": deck,
-            "modelName": "Cloze",
-            "fields": {"Text": text, "Extra": extra},
+            "modelName": model,
+            "fields": {text_field: text, extra_field: extra},
             "tags": tags or [],
             "options": {
                 "allowDuplicate": False,
